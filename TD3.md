@@ -7,3 +7,5 @@ Le groupe fictif Aurélia, conglomérat européen présent dans 40 pays (retail,
 ## Consigne 
 
 Votre mission est de classifier les risques de chacun de ces dix systèmes sur une échelle allant d’unacceptable risk à low risk, sans fournir de solution toute faite dans ce document. Produisez une cartographie systématique qui explicite pour chaque système sa finalité, le contexte d’usage, les catégories de données mobilisées, la nature du modèle (LLM/RAG, agent outillé, système de décision automatisée, vision, graph-ML, génération multimodale), les impacts potentiels sur les parties prenantes et les raisons précises qui justifient le niveau de risque retenu. Lorsque cela est pertinent, discutez des facteurs aggravants ou atténuants (environnement de déploiement, exposition au public, effets irréversibles, possibilités de recours), et proposez des alternatives réalistes (techniques, process, organisation, UX) permettant soit de réduire le niveau de risque, soit de remplacer la solution par une approche moins risquée tout en maintenant l’objectif métier.
+
+[Ressource](https://assets.kpmg.com/content/dam/kpmgsites/xx/pdf/2024/02/decoding-the-eu-ai-act.pdf)
