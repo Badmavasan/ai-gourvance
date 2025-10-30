@@ -118,13 +118,87 @@ Variables candidates : revenus, âge, code postal (préfixe), temps de trajet do
 Attribut sensible (audit-only) : grp (0/1), collecté avec base légale pour audit d’équité (pas utilisé en production).
 Labels historiques : approuve (décision humaine passée) et rembourse (observé seulement si approuvé ⇒ « selective labels »).
 
-**Problème 1 — Proxy bias**
-**Détection à mener**
-Le préfixe de code postal et/ou le temps de trajet pourraient être des proxys du statut socio-éco ou grp.
-Indices à regarder : forte mutual information/corrélation entre (zip/temps) et grp; écarts de TPR/FPR par grp quand ces features sont présentes; adversaire qui prédit grp à partir des features.
 
-**Scénario**
+## 2) Problème A — **Proxy bias**
 
-Le modèle apprend qu’habiter loin d’une agence (ou dans des préfixes de code postal “X9”) est associé à plus de non-remboursements… mais ces variables capturent en fait des différences structurelles d’accès au système bancaire liées au groupe grp. Résultat : les candidats de grp=1 sont systématiquement sous-notés, même à revenu égal.
+### Détection (à mener)
+- `zip_pref` et `trajet_min` peuvent servir de **proxys** de `grp` (statut socio-éco/zone).  
+- Indices :  
+  - forte corrélation / MI entre (`zip_pref`, `trajet_min`) et `grp`;  
+  - **écarts TPR/FPR** par `grp` quand ces features sont incluses ;  
+  - **classifieur adversarial** prédisant `grp` à partir des features.
 
-(...)
+### Scénario
+À revenu et score historique comparables, les dossiers venant des **préfixes X9** (zones éloignées, bancarisées différemment) sont **sous-notés**. Le modèle a appris le **proxy** (X9 / trajet long) plutôt que le vrai signal de risque → **sous-approbation systématique** de `grp=1`.
+
+### Mini-jeu de données (10 lignes) — *détection proxy*
+
+| id | grp (audit) | revenu_k€ | age | zip_pref | trajet_min | score_hist | approuve | rembourse_obs |
+|---:|:-----------:|----------:|----:|:--------:|-----------:|-----------:|:--------:|:-------------:|
+|  1 |      0      |    24     | 28  |   X1     |     15     |    0.6     |    1     |       1       |
+|  2 |      1      |    24     | 29  |   X9     |     55     |    0.6     |    0     |      NA       |
+|  3 |      0      |    19     | 22  |   X1     |     20     |    0.4     |    1     |       1       |
+|  4 |      1      |    26     | 31  |   X9     |     60     |    0.7     |    0     |      NA       |
+|  5 |      1      |    22     | 27  |   X9     |     50     |    0.5     |    0     |      NA       |
+|  6 |      0      |    21     | 24  |   X1     |     18     |    0.5     |    1     |       0       |
+|  7 |      1      |    24     | 26  |   X9     |     58     |    0.6     |    0     |      NA       |
+|  8 |      0      |    25     | 30  |   X1     |     12     |    0.7     |    1     |       1       |
+|  9 |      1      |    25     | 30  |   X9     |     57     |    0.7     |    0     |      NA       |
+| 10 |      0      |    23     | 25  |   X1     |     16     |    0.5     |    1     |       1       |
+
+> **Lecture** : les observations X9/trajet long (souvent `grp=1`) sont refusées malgré des profils comparables → suspicion de **proxy**.
+
+## 3) Problème B — **Biais de labels** (sélectivité + sévérité inégale)
+
+### Deux sources
+1) **Sélectivité des labels** : `rembourse_obs` n’existe **que** pour `approuve=1` → on n’observe jamais l’issue pour les refusés (biais d’échantillonnage de label).  
+2) **Biais de décision historique** : pour des X proches, `grp=1` a **moins d’approbations** (label `approuve` **biaisé**).
+
+### Scénario
+Les décideurs passés, plus stricts pour `grp=1` et X9, ont rarement approuvé ces dossiers. Le modèle ne voit donc **aucun remboursement** chez eux (car jamais exposés au prêt), et « apprend » à continuer de les refuser.
+
+### Mini-jeu de données (10 lignes) — *sélectivité/annotation*
+| id | grp (audit) | revenu_k€ | age | zip_pref | score_hist | approuve (label hist.) | rembourse_obs |
+|---:|:-----------:|----------:|----:|:--------:|-----------:|:----------------------:|:-------------:|
+|  1 |      0      |    22     | 27  |   X1     |    0.5     |           1            |       1       |
+|  2 |      1      |    22     | 27  |   X9     |    0.5     |           0            |      NA       |
+|  3 |      0      |    24     | 29  |   X1     |    0.6     |           1            |       1       |
+|  4 |      1      |    24     | 29  |   X9     |    0.6     |           0            |      NA       |
+|  5 |      0      |    23     | 26  |   X1     |    0.5     |           1            |       0       |
+|  6 |      1      |    23     | 26  |   X9     |    0.5     |           0            |      NA       |
+|  7 |      0      |    25     | 31  |   X1     |    0.7     |           1            |       1       |
+|  8 |      1      |    25     | 31  |   X9     |    0.7     |           0            |      NA       |
+|  9 |      0      |    21     | 24  |   X1     |    0.4     |           1            |       1       |
+| 10 |      1      |    21     | 24  |   X9     |    0.4     |           0            |      NA       |
+
+> **Lecture** : paires presque identiques {1–2, 3–4, …} mais **approbation refusée** pour `grp=1` → **biais de label** + **labels manquants non aléatoires**.
+
+## 4) Stratégies ML & process
+
+### A) Atténuer le **proxy bias**
+- **Audit de proxys**  
+  - Mesurer corrélation/MI entre (`zip_pref`, `trajet_min`) et `grp`.  
+  - **Classifieur adversarial** prédisant `grp` à partir de X → viser **AUC≈0,5** après mitigation.
+- **Pré-traitement**  
+  - Retrait/agrégation prudente des variables spatiales (binning, distances généralisées).  
+  - **Reweighing** (Kamiran–Calders) pour équilibrer la distribution conditionnelle par `grp`.  
+  - **Disparate Impact Remover** / normalisation par groupe (si juridiquement admis).
+- **Validation**  
+  - Rapporter **TPR/FPR/PPV/Calibration** par `grp` et par **sous-groupes intersectionnels**.  
+  - **Tests contre-factuels** (X1↔X9, même X autrement).
+
+### B) Corriger le **biais de labels** (sélectivité + annotation)
+- **Sélectivité (labels manquants pour refusés)**  
+  - **Inverse Propensity Scoring (IPS)** avec modèle `P(approuve|X)`.  
+  - **PU Learning** (Positive-Unlabeled) pour apprendre `rembourse` quand seuls les approuvés sont labellisés.  
+  - **Reject Inference** (EM, parcelling, fuzzy augmentation) pour estimer l’issue latente des refusés.  
+  - **Expérimentation contrôlée** : approuver aléatoirement une petite fraction borderline (cadre éthique & légal) pour **révéler** l’issue réelle.
+- **Biais d’annotation/décision**  
+  - **Relabellisation** aveugle d’un échantillon, appariement X proche X1/X9.  
+  - **Loss robustes au bruit** (Generalized Cross-Entropy, Co-teaching, Bootstrap).  
+  - **Calibration** par groupe + contrôle de **disparate mistreatment**.
+- **Gouvernance & documentation**  
+  - Interdire l’usage direct d’attributs sensibles (sauf **audit**).  
+  - **Data Card / Model Card** avec métriques d’équité et limites d’usage.  
+  - **Canaux de recours** utilisateur, **monitoring** continu (TPR/FPR/PPV/Calib, drift).
+
